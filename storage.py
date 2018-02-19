@@ -96,7 +96,7 @@ def create_database(connection, c, timeframe):
                 score = row['score']
 
                 # Only comments with an "interesting" score
-                if score >= 3 or score <= -3:
+                if score >= 2 or score <= -2:
                     comment = acceptable(row['body'])
                     # Only comments with acceptable length and word count
                     if comment:
@@ -139,53 +139,23 @@ def clean(connection, c):
 def match_parents(connection, c, timeframe):
     row_counter = 0
     start_time = datetime.now()
-    #match_transaction = []
-
-    c.execute("SELECT parent_id, comment_id, comment FROM parent_reply ORDER BY ABS(score) DESC")
-    rows = c.fetchall()
-    accepted_comments = len(rows)
-    #print("len1: {}".format(accepted_comments))
-
-    # A copy of the "rows" list used for finding children more quickly.
-    # This is done by discarding the children from this list once found
-    #c.execute("SELECT DISTINCT parent_id, comment_id, comment FROM parent_reply ORDER BY ABS(score) DESC")
-    #c.execute("SELECT parent_id, comment_id, MAX(ABS(score)) FROM parent_reply GROUP BY parent_id")
-    c.execute("SELECT parent_id, comment_id, MAX(ABS(score)) FROM parent_reply GROUP BY parent_id")
-    rows_index = c.fetchall()
-    index_len = len(rows_index)
-    #print("len2: {}".format(len(rows_index)))
-    #trash_index = []
+    match_batch = []
     
-    for row in rows:
+    # A list of all the top rated comments with unique parents
+    c.execute("SELECT parent_id, comment_id, MAX(ABS(score)) FROM parent_reply GROUP BY parent_id")
+    top_children_rows = c.fetchall()
+    accepted_comments = len(top_children_rows)
+    print("Traversing {} rows".format(len(top_children_rows)))
+    
+    for row in top_children_rows:
         # Uses this comment's ID as the parent_id
-        parent_id = row[1]
         row_counter += 1
-
-        child = False
-        for row2 in rows:
-            if row2[0] == parent_id:
-                child = row2
-                break
-
-        '''
-        child = False
-        for i in range(0, index_len - 1):
-            row2 = rows_index[i]
-            if row2[0] == parent_id:
-                child = row2
-                # Now remove the element
-                if i == index_len - 1:
-                    rows_index.pop()
-                else:
-                    rows_index[i] = rows_index.pop()
-                    
-                index_len -= 1
-                break
-                '''
         
-
-        if child:
-            c.execute("""UPDATE parent_reply SET parent=? WHERE comment_id=?;""", (row[2], child[1]))
+        c.execute("""UPDATE parent_reply
+                     SET parent=(SELECT comment
+                                 FROM parent_reply
+                                 WHERE comment_id=?)
+                     WHERE comment_id=?;""", (row[0], row[1]))
 
         if row_counter % match_printing == 0:
             elapsed = (datetime.now() - start_time).total_seconds()
