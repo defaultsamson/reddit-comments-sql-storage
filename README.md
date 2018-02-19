@@ -62,13 +62,22 @@ And the contents of `time.txt` are
 2012-12
 ```
 To create a database for every row in the text file time.txt, one would execute
+
 `./storage.py -i ./time.txt`
+
 If you wanted to create a database for every third row, do 
+
 `./storage.py -i ./time.txt -m 3`
+
 If you wanted to create a database for every third row starting with the second row, do 
+
 `./storage.py -i ./time.txt -m 3 -r 1`
+
 Using the modulus and remainder parameters is handy when you'd like to run multiple processes at once. For example, to process three databases at a time, open 3 terminals and execute
+
 `./storage.py -i ./time.txt -m 3 -r 0`
+
 `./storage.py -i ./time.txt -m 3 -r 1`
+
 `./storage.py -i ./time.txt -m 3 -r 2`
 
