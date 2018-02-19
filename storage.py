@@ -2,28 +2,51 @@ import sqlite3
 import json
 from datetime import datetime
 
-f = open('timeframes.txt', 'r')
+def getopts(argv):
+    opts = {}  # Empty dictionary to store key-value pairs.
+    while argv:  # While there are arguments left to parse...
+        if argv[0][0] == '-':  # Found a "-name value" pair.
+            opts[argv[0]] = argv[1]  # Add key and value to the dictionary.
+        argv = argv[1:]  # Reduce the argument list by copying it starting from index 1.
+    return opts
+
+from sys import argv
+args = getopts(argv)
+
+filename = 'timeframes.txt'
+if '-i' in args:
+    filename = args['-i']
+
+f = open(filename, 'r')
 file_read = f.read().splitlines()
 f.close()
+
+mod = 1
+if '-m' in args:
+    mod = int(args['-m'])
+
+remainder = 0
+if '-r' in args:
+    remainder = int(args['-r'])
 
 timeframes = []
 i = 0
 for line in file_read:
-    if i % 3 == 2 :
+    if i % mod == remainder:
         timeframes.append(line)
     i += 1
 
 parse_printing = 100000
-match_printing = 10
+match_printing = 1000
 max_transactions = 100000
-max_match_transactions = 10000
+trash_interval = 10000
 
 sql_transaction = []
 def create_database(connection, c, timeframe):
     print("Creating Database: {}".format(timeframe))
     
     def create_table():
-        c.execute("CREATE TABLE IF NOT EXISTS parent_reply(paired BIT, parent_id TEXT, comment_id TEXT UNIQUE, parent TEXT, comment TEXT, subreddit TEXT, unix INT, score INT)")
+        c.execute("CREATE TABLE IF NOT EXISTS parent_reply(parent_id TEXT, comment_id TEXT UNIQUE, parent TEXT, comment TEXT, subreddit TEXT, unix INT, score INT)")
 
     def send_transaction():
         global sql_transaction
@@ -82,7 +105,7 @@ def create_database(connection, c, timeframe):
                         subreddit = row['subreddit']
                         created_utc = row['created_utc']
                         
-                        wasted_time += build_transaction("""INSERT INTO parent_reply (paired, parent_id, comment_id, comment, subreddit, unix, score) VALUES (0,"{}","{}","{}","{}",{},{});""".format(parent_id, comment_id, comment, subreddit, int(created_utc), score))
+                        wasted_time += build_transaction("""INSERT INTO parent_reply (parent_id, comment_id, comment, subreddit, unix, score) VALUES ("{}","{}","{}","{}",{},{});""".format(parent_id, comment_id, comment, subreddit, int(created_utc), score))
                         
                         acceptable_comments += 1
                         
@@ -104,10 +127,6 @@ def create_database(connection, c, timeframe):
 def clean(connection, c):
     start_time = datetime.now()
 
-    # SQLite doesn't support
-    #c.execute("ALTER TABLE parent_reply DROP COLUMN paired")
-    #connection.commit()
-    
     c.execute("DELETE FROM parent_reply WHERE parent IS NULL")
     connection.commit()
     
@@ -117,92 +136,66 @@ def clean(connection, c):
     elapsed = (datetime.now() - start_time).total_seconds()
     print("Cleaned up, took {} second(s)".format(round(elapsed * 10) / 10))
 
-match_transaction = []
-    
 def match_parents(connection, c, timeframe):
-    '''
-    def send_match_transaction():
-        global match_transaction
-        if len(match_transaction) > 0:
-            start_time = datetime.now()
-            c.execute('BEGIN TRANSACTION')
-            for s in match_transaction:
-                try:
-                    c.execute(s)
-                except:
-                    pass
-            connection.commit()
-            match_transaction = []
-            elapsed = (datetime.now() - start_time).total_seconds()
-            print("Executed batch SQL transaction, took {} second(s)".format(round(elapsed * 100) / 100))
-            return elapsed
-
-    def build_match_transaction(sql):
-        global sql_transaction
-        match_transaction.append(sql)
-
-        if len(match_transaction) >= max_match_transactions:
-            return send_match_transaction()
-        return 0
-        '''
-
     row_counter = 0
     start_time = datetime.now()
-    #wasted_time = 0
-    c.execute("SELECT COUNT(*) FROM parent_reply")
-    accepted_comments = c.fetchone()[0]
     #match_transaction = []
 
-    c.execute("CREATE INDEX IF NOT EXISTS idx_score ON parent_reply (ABS(score) DESC)")
+    c.execute("SELECT parent_id, comment_id, comment FROM parent_reply ORDER BY ABS(score) DESC")
+    rows = c.fetchall()
+    accepted_comments = len(rows)
+    #print("len1: {}".format(accepted_comments))
+
+    # A copy of the "rows" list used for finding children more quickly.
+    # This is done by discarding the children from this list once found
+    #c.execute("SELECT DISTINCT parent_id, comment_id, comment FROM parent_reply ORDER BY ABS(score) DESC")
+    #c.execute("SELECT parent_id, comment_id, MAX(ABS(score)) FROM parent_reply GROUP BY parent_id")
+    c.execute("SELECT parent_id, comment_id, MAX(ABS(score)) FROM parent_reply GROUP BY parent_id")
+    rows_index = c.fetchall()
+    index_len = len(rows_index)
+    #print("len2: {}".format(len(rows_index)))
+    #trash_index = []
     
-    while True:
-        # Selects the highest absolute scoring (to keep things interesting) unpaired comment
-        sql1 = "SELECT comment_id, comment FROM parent_reply WHERE paired=0 ORDER BY ABS(score) DESC LIMIT 1"
-        c.execute(sql1)
-        parent = c.fetchone()
-        # If there are no more comments left to traverse
-        if parent == None:
-            break
-        parent_id = parent[0]
-        parent_body = parent[1]
-
-        # Then locates the highest ranking child of the above parent comment
-        sql2 = """SELECT comment_id FROM parent_reply WHERE parent_id='{}' ORDER BY ABS(score) DESC LIMIT 1""".format(parent_id)
-        c.execute(sql2)
-        comment = c.fetchone()
-        # Just double checking that the child exists
-        if comment != None:
-            comment_id = comment[0]
-
-            # Then fills the "parent" field of the child comment
-            c.execute("""UPDATE parent_reply SET parent=? WHERE comment_id=?;""", (parent_body, comment_id))
-            #build_match_transaction("""UPDATE parent_reply SET parent="{}" WHERE comment_id="{}";""".format(parent_body, comment_id))
-            
-        # Then updates the "paired" field of the parent comment so that it's not traversed again
-        sql3 = """UPDATE parent_reply SET paired=1 WHERE comment_id='{}'""".format(parent_id)
-        #build_match_transaction(sql3)
-        
-        c.execute(sql3)
-        # TODO Don't commit as often. Keep track of parent id's?
-        connection.commit()
-
+    for row in rows:
+        # Uses this comment's ID as the parent_id
+        parent_id = row[1]
         row_counter += 1
 
-        # This could remove potential parents of other comments, so don't run.
-        # Instead just clean at the end
-        #c.execute("""DELETE FROM parent_reply WHERE parent_id='{}' AND NOT comment_id='{}'""".format(parent_id, comment_id))
-        #connection.commit()
+        child = False
+        for row2 in rows:
+            if row2[0] == parent_id:
+                child = row2
+                break
+
+        '''
+        child = False
+        for i in range(0, index_len - 1):
+            row2 = rows_index[i]
+            if row2[0] == parent_id:
+                child = row2
+                # Now remove the element
+                if i == index_len - 1:
+                    rows_index.pop()
+                else:
+                    rows_index[i] = rows_index.pop()
+                    
+                index_len -= 1
+                break
+                '''
         
+
+        if child:
+            c.execute("""UPDATE parent_reply SET parent=? WHERE comment_id=?;""", (row[2], child[1]))
+
         if row_counter % match_printing == 0:
-            elapsed = (datetime.now() - start_time).total_seconds() #- wasted_time
+            elapsed = (datetime.now() - start_time).total_seconds()
             start_time = datetime.now()
-            #wasted_time = 0
             rate = "NaN"
             if elapsed != 0:
                 rate = round(10 * match_printing / elapsed) / 10
             print('{}:[{}] Rows Processed: {}/{}, Rate: {} Row/s'.format(timeframe, str(datetime.now()), row_counter, accepted_comments, rate))
 
-    #send_match_transaction()
+    connection.commit()
 
 for timeframe in timeframes:
     connection = sqlite3.connect('./reddit_db/{}.db'.format(timeframe))
