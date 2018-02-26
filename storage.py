@@ -147,7 +147,7 @@ def clean(connection, c):
 
     # Removes all instances of comments with no parents
     # Ideally this shouldn't occur but because the comments are stored in discreet months there will be discrepancies
-    c.execute("DELETE FROM parent_reply WHERE parent IS NULL") 
+    c.execute("DELETE FROM parent_reply WHERE parent IS NULL OR comment IS NULL") 
     connection.commit() 
 
     # Packs the database to its smallest possible size
@@ -162,12 +162,15 @@ def match_comments(connection, c, timeframe):
     row_counter = 0
     start_time = datetime.now()
     wasted_time = 0 # The time wasted from building or sending
+
+    #c.execute("SELECT COUNT(*) FROM parent_reply GROUP BY parent_id")
+    #accepted_comments = c.fetchone()[0]
     
     # A list of the top rated comment in each group of parent_id
     c.execute("SELECT parent_id, comment_id, MAX(ABS(score)) FROM parent_reply GROUP BY parent_id")
     top_children_rows = c.fetchall()
     accepted_comments = len(top_children_rows)
-    print("Traversing {} rows".format(len(top_children_rows)))
+    print("Traversing {} rows".format(accepted_comments))
     
     for row in top_children_rows:
         row_counter += 1
