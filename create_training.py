@@ -1,47 +1,35 @@
 import sqlite3
-import pandas as pd
+from datetime import datetime
+
+print_interval = 500000
 
 f = open('timeframes.txt', 'r')
 timeframes = f.read().splitlines()
 
 for timeframe in timeframes:
-    print("Processing database: {}".format(timeframe))
+    print('{}:[{}] Processing database...'.format(timeframe, str(datetime.now())))
     connection = sqlite3.connect('./reddit_db/{}.db'.format(timeframe))
     c = connection.cursor()
-    limit = 50000
-    last_unix = 0
-    cur_length = limit
-    counter = 0
-    test_done = False
 
-    while cur_length == limit:
+    c.execute("SELECT COUNT(*) FROM parent_reply GROUP BY parent_id")
+    comment_count = c.fetchone()[0]
+    
+    row_counter = 0
+    start_time = datetime.now()
 
-        df = pd.read_sql("SELECT * FROM parent_reply WHERE unix > {} ORDER BY unix ASC LIMIT {}".format(last_unix,limit),connection)
-        last_unix = df.tail(1)['unix'].values[0]
-        cur_length = len(df)
+    cur = c.execute("SELECT parent, comment FROM parent_reply")
 
-        '''
-        if not test_done:
-            with open('test.from','a', encoding='utf8') as f:
-                for content in df['parent'].values:
-                    f.write(content+'\n')
+    with open('train.from','a', encoding='utf8') as fro:
+        with open('train.to','a', encoding='utf8') as to:
+            for row in cur:
+                fro.write(row[0] + '\n')
+                to.write(row[1] + '\n')
+                row_counter += 1
+                if row_counter % print_interval == 0:
+                    elapsed = (datetime.now() - start_time).total_seconds()
+                    start_time = datetime.now()
+                    rate = "NaN"
+                    if elapsed != 0:
+                        rate = round(10 * print_interval / elapsed) / 10 # Calculate the rate and round to the first decimal
+                    print('{}:[{}] Rows Processed: {}/{}, Rate: {} Row/s'.format(timeframe, str(datetime.now()), row_counter, comment_count, rate))
 
-            with open('test.to','a', encoding='utf8') as f:
-                for content in df['comment'].values:
-                    f.write(str(content)+'\n')
-
-            test_done = True
-        '''
-
-        #else:
-        with open('train.from','a', encoding='utf8') as f:
-            for content in df['parent'].values:
-                f.write(content+'\n')
-
-        with open('train.to','a', encoding='utf8') as f:
-            for content in df['comment'].values:
-                f.write(str(content)+'\n')
-
-        counter += 1
-        if counter % 20 == 0:
-            print(counter*limit,'rows completed so far')
